@@ -32,7 +32,7 @@ class BO_algo():
         # self.v_kernel.k1.constant_value = np.sqrt(2)  # RBF variance
         # self.v_kernel.k2.constant_value = 4.0  # Prior mean
 
-        self.gp_f = GaussianProcessRegressor(kernel=Matern(nu=2.5), alpha=self.sigma_f**2)
+        self.gp_f = GaussianProcessRegressor(kernel=ConstantKernel(constant_value=0.5) * RBF(length_scale=0.5), alpha=self.sigma_f**2)
         self.gp_v = GaussianProcessRegressor(kernel=DotProduct() + Matern(nu=2.5), alpha=self.sigma_v**2)
         #self.gp_v.mean = 4.0
 
@@ -42,7 +42,7 @@ class BO_algo():
 
         # might me tuned
         self.lamb = 10000000.0
-        self.beta = 0.01
+        self.beta = 0.005
 
         self.iteration = 0
 
