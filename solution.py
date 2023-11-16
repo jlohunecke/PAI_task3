@@ -3,12 +3,13 @@ import numpy as np
 from scipy.optimize import fmin_l_bfgs_b
 # import additional ...
 from sklearn.gaussian_process import GaussianProcessRegressor
-from sklearn.gaussian_process.kernels import RBF, Matern, DotProduct, WhiteKernel, Sum, ConstantKernel as C
+from sklearn.gaussian_process.kernels import ConstantKernel, RBF, Matern, DotProduct, WhiteKernel, Sum, ConstantKernel as C
 
 
 # global variables
 DOMAIN = np.array([[0, 10]])  # restrict \theta in [0, 10]
 SAFETY_THRESHOLD = 4  # threshold, upper bound of SA
+DELTA = 0.999
 
 
 # TODO: implement a self-contained solution in the BO_algo class.
@@ -25,14 +26,14 @@ class BO_algo():
         #self.f_kernel = RBF(length_scale=1.0) + WhiteKernel(noise_level=0.5)
         #self.v_kernel = DotProduct(sigma_0=0.0) + RBF(length_scale=1.0) + WhiteKernel(noise_level=np.sqrt(2.0))
 
-        self.f_kernel = C() * Matern(length_scale=1.0, nu=2.5)
+        # self.f_kernel = C() * Matern(length_scale=1.0, nu=2.5)
 
-        self.v_kernel = Sum(C() * RBF(length_scale=5.0), C() * Matern(length_scale=1.0, nu=2.5))
-        self.v_kernel.k1.constant_value = np.sqrt(2)  # RBF variance
-        self.v_kernel.k2.constant_value = 4.0  # Prior mean
+        # self.v_kernel = Sum(C() * RBF(length_scale=5.0), C() * Matern(length_scale=1.0, nu=2.5))
+        # self.v_kernel.k1.constant_value = np.sqrt(2)  # RBF variance
+        # self.v_kernel.k2.constant_value = 4.0  # Prior mean
 
-        self.gp_f = GaussianProcessRegressor(kernel=self.f_kernel, alpha=self.sigma_f**2)
-        self.gp_v = GaussianProcessRegressor(kernel=self.v_kernel, alpha=self.sigma_v**2)
+        self.gp_f = GaussianProcessRegressor(kernel=Matern(nu=2.5), alpha=self.sigma_f**2)
+        self.gp_v = GaussianProcessRegressor(kernel=DotProduct() + Matern(nu=2.5), alpha=self.sigma_v**2)
         #self.gp_v.mean = 4.0
 
         self.X = np.empty((0, 1))
@@ -40,8 +41,10 @@ class BO_algo():
         self.v = np.empty((0, 1))
 
         # might me tuned
-        self.lamb = 4.0
-        self.beta = 1.0
+        self.lamb = 10000000.0
+        self.beta = 0.01
+
+        self.iteration = 0
 
     def next_recommendation(self):
         """
@@ -107,11 +110,15 @@ class BO_algo():
         x = np.atleast_2d(x).transpose()
         # TODO: Implement the acquisition function you want to optimize.
         mean_f, std_f = self.gp_f.predict(x, return_std=True)
-        mean_v, std_v = self.gp_v.predict(x, return_std=True)
-        mean = mean_f - self.lamb * max(0.0, mean_v)
-        std = np.sqrt(std_f**2 + self.lamb**2 * std_v**2)
-        # UCB acquisition function
-        af_value = mean + self.beta * std
+        # mean_v, std_v = self.gp_v.predict(x, return_std=True)
+        # mean = mean_f - self.lamb * max(0.0, mean_v)
+        # std = np.sqrt(std_f**2 + self.lamb**2 * std_v**2)
+        # # UCB acquisition function
+        # af_value = mean + self.beta * std
+        # self.beta = np.sqrt(2 * np.log(self.iteration / DELTA))
+
+        mean = mean_f + self.beta * std_f
+        af_value = mean - self.lamb * np.maximum(self.gp_v.predict(x), SAFETY_THRESHOLD)
 
         return af_value
 
@@ -137,6 +144,8 @@ class BO_algo():
 
         self.gp_f.fit(x_fit, self.f)
         self.gp_v.fit(x_fit, self.v)
+
+        self.iteration += 1
 
     def get_solution(self):
         """
