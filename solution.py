@@ -2,9 +2,10 @@
 import numpy as np
 from scipy.optimize import fmin_l_bfgs_b
 # import additional ...
+from scipy.stats import norm
 from sklearn.gaussian_process import GaussianProcessRegressor
 from sklearn.gaussian_process.kernels import ConstantKernel, RBF, Matern, DotProduct, WhiteKernel, Sum, ConstantKernel as C
-
+import matplotlib.pyplot as plt
 
 # global variables
 DOMAIN = np.array([[0, 10]])  # restrict \theta in [0, 10]
@@ -41,8 +42,9 @@ class BO_algo():
         self.v = np.empty((0, 1))
 
         # might me tuned
-        self.lamb = 10000000.0
-        self.beta = 0.005
+        self.lamb = 1000
+        self.beta = 0.3
+        self.xi = 0.02
 
         self.iteration = 0
 
@@ -110,15 +112,32 @@ class BO_algo():
         x = np.atleast_2d(x).transpose()
         # TODO: Implement the acquisition function you want to optimize.
         mean_f, std_f = self.gp_f.predict(x, return_std=True)
-        # mean_v, std_v = self.gp_v.predict(x, return_std=True)
+        mean_v, std_v = self.gp_v.predict(x, return_std=True)
         # mean = mean_f - self.lamb * max(0.0, mean_v)
         # std = np.sqrt(std_f**2 + self.lamb**2 * std_v**2)
         # # UCB acquisition function
         # af_value = mean + self.beta * std
-        # self.beta = np.sqrt(2 * np.log(self.iteration / DELTA))
+        self.beta = np.sqrt(2 * np.log(self.iteration / DELTA))
 
-        mean = mean_f + self.beta * std_f
-        af_value = mean - self.lamb * np.maximum(self.gp_v.predict(x), SAFETY_THRESHOLD)
+        # UCB acquisition function
+        af_value = mean_f + self.beta * std_f
+
+        # Thompson sampling acquisition function
+        # mean = np.random.normal(mean_f, std_f)
+
+        # Expected improvement acquisition function
+        # Best observed value so far
+        # f_best = np.max(self.gp_f.y_train_)
+
+        # # Compute Expected Improvement
+        # Z = (mean_f - f_best - self.xi) / std_f
+        # af_value = (mean_f - f_best - self.xi) * norm.cdf(Z) + std_f * norm.pdf(Z)
+
+        if mean_v + 3*std_v >= SAFETY_THRESHOLD:
+            af_value = af_value - self.lamb * (mean_v + 3*std_v - SAFETY_THRESHOLD)
+
+
+        # af_value = mean - self.lamb * np.maximum(self.gp_v.predict(x)-SAFETY_THRESHOLD, 0)
 
         return af_value
 
@@ -164,14 +183,44 @@ class BO_algo():
         return x_opt
 
     def plot(self, plot_recommendation: bool = True):
-        """Plot objective and constraint posterior for debugging (OPTIONAL).
+        """Plot objective, constraint posterior and acquisition function for debugging (OPTIONAL).
 
         Parameters
         ----------
         plot_recommendation: bool
             Plots the recommended point if True.
         """
-        pass
+        x = np.linspace(DOMAIN[0, 0], DOMAIN[0, 1], 1000).reshape(-1, 1)
+
+        # Predict objective function
+        y_mean_f, y_std_f = self.gp_f.predict(x, return_std=True)
+
+        # Predict constraint function
+        y_mean_v, y_std_v = self.gp_v.predict(x, return_std=True)
+
+        # Compute acquisition function
+        af_value = self.acquisition_function(x)
+
+        plt.figure(figsize=(12, 8))
+
+        plt.plot(x, y_mean_f, 'b-', label='Predicted objective')
+        plt.fill_between(x.ravel(), y_mean_f - y_std_f, y_mean_f + y_std_f, alpha=0.5, color='b')
+        plt.plot(self.X, self.f, 'bx', label='Observed objective')
+
+        plt.plot(x, y_mean_v, 'g-', label='Predicted constraint')
+        plt.fill_between(x.ravel(), y_mean_v - y_std_v, y_mean_v + y_std_v, alpha=0.5, color='g')
+        plt.plot(self.X, self.v, 'gx', label='Observed constraint')
+
+        plt.plot(x, af_value, 'r-', label='Acquisition function')
+
+        if plot_recommendation:
+            plt.axvline(self.next_recommendation(), color='r', linestyle='--', label='Next recommendation')
+
+        plt.axhline(SAFETY_THRESHOLD, color='r', linestyle='--', label='Safety threshold')
+        plt.legend()
+
+        plt.tight_layout()
+        plt.show()
 
 
 # ---
