@@ -18,33 +18,20 @@ DELTA = 0.999
 class BO_algo():
     def __init__(self):
         """Initializes the algorithm with a parameter configuration."""
-        # TODO: Define all relevant class members for your BO algorithm here.
         self.sigma_f = 0.15
         self.sigma_v = 0.0001
 
-        #self.f_kernel = Matern(nu=2.5, length_scale=1.0)
-        #self.v_kernel = DotProduct(sigma_0=0.0)+Matern(nu=2.5, length_scale=1.0)
-        #self.f_kernel = RBF(length_scale=1.0) + WhiteKernel(noise_level=0.5)
-        #self.v_kernel = DotProduct(sigma_0=0.0) + RBF(length_scale=1.0) + WhiteKernel(noise_level=np.sqrt(2.0))
-
-        # self.f_kernel = C() * Matern(length_scale=1.0, nu=2.5)
-
-        # self.v_kernel = Sum(C() * RBF(length_scale=5.0), C() * Matern(length_scale=1.0, nu=2.5))
-        # self.v_kernel.k1.constant_value = np.sqrt(2)  # RBF variance
-        # self.v_kernel.k2.constant_value = 4.0  # Prior mean
-
         self.gp_f = GaussianProcessRegressor(kernel=ConstantKernel(constant_value=0.5) * RBF(length_scale=0.5), alpha=self.sigma_f**2)
         self.gp_v = GaussianProcessRegressor(kernel=DotProduct() + Matern(nu=2.5), alpha=self.sigma_v**2)
-        #self.gp_v.mean = 4.0
-
-        self.X = np.empty((0, 1))
+        
+        self.X = np.array([]).reshape(-1, 1)
         self.f = np.empty((0, 1))
         self.v = np.empty((0, 1))
 
-        # might me tuned
         self.lamb = 1000
         self.beta = 0.3
-        self.xi = 0.02
+        # not needed for ucb:
+        # self.xi = 0.02
 
         self.iteration = 0
 
@@ -57,13 +44,7 @@ class BO_algo():
         recommendation: float
             the next point to evaluate
         """
-        # TODO: Implement the function which recommends the next point to query
-        # using functions f and v.
-        # In implementing this function, you may use
-        # optimize_acquisition_function() defined below.
-
-        recommendation = np.atleast_2d(self.optimize_acquisition_function())
-        return recommendation
+        return np.atleast_2d(self.optimize_acquisition_function())
 
     def optimize_acquisition_function(self):
         """Optimizes the acquisition function defined below (DO NOT MODIFY).
@@ -109,35 +90,29 @@ class BO_algo():
             shape (N, 1)
             Value of the acquisition function at x
         """
-        x = np.atleast_2d(x).transpose()
-        # TODO: Implement the acquisition function you want to optimize.
+        x = np.atleast_2d(x)
+        
         mean_f, std_f = self.gp_f.predict(x, return_std=True)
         mean_v, std_v = self.gp_v.predict(x, return_std=True)
-        # mean = mean_f - self.lamb * max(0.0, mean_v)
-        # std = np.sqrt(std_f**2 + self.lamb**2 * std_v**2)
+        
         # # UCB acquisition function
-        # af_value = mean + self.beta * std
+        # update beta according to the current iteration
         self.beta = np.sqrt(2 * np.log(self.iteration / DELTA))
 
         # UCB acquisition function
         af_value = mean_f + self.beta * std_f
 
         # Thompson sampling acquisition function
-        # mean = np.random.normal(mean_f, std_f)
+        # af_value = np.random.normal(mean_f, std_f)
 
         # Expected improvement acquisition function
         # Best observed value so far
         # f_best = np.max(self.gp_f.y_train_)
-
-        # # Compute Expected Improvement
         # Z = (mean_f - f_best - self.xi) / std_f
         # af_value = (mean_f - f_best - self.xi) * norm.cdf(Z) + std_f * norm.pdf(Z)
 
         if mean_v + 3*std_v >= SAFETY_THRESHOLD:
             af_value = af_value - self.lamb * (mean_v + 3*std_v - SAFETY_THRESHOLD)
-
-
-        # af_value = mean - self.lamb * np.maximum(self.gp_v.predict(x)-SAFETY_THRESHOLD, 0)
 
         return af_value
 
@@ -154,15 +129,12 @@ class BO_algo():
         v: float
             SA constraint func
         """
-        # TODO: Add the observed data {x, f, v} to your model.
-        self.X = np.append(self.X, x)
+        self.X = np.vstack([self.X, x])
         self.f = np.append(self.f, f)
         self.v = np.append(self.v, v)
 
-        x_fit = np.atleast_2d(self.X).transpose()
-
-        self.gp_f.fit(x_fit, self.f)
-        self.gp_v.fit(x_fit, self.v)
+        self.gp_f.fit(self.X, self.f)
+        self.gp_v.fit(self.X, self.v)
 
         self.iteration += 1
 
@@ -175,7 +147,6 @@ class BO_algo():
         solution: float
             the optimal solution of the problem
         """
-        # TODO: Return your predicted safe optimum of f.
         idx_valid = np.where(self.v < SAFETY_THRESHOLD)
         x_valid = self.X[idx_valid]
         f_valid = self.f[idx_valid]
@@ -190,37 +161,7 @@ class BO_algo():
         plot_recommendation: bool
             Plots the recommended point if True.
         """
-        x = np.linspace(DOMAIN[0, 0], DOMAIN[0, 1], 1000).reshape(-1, 1)
-
-        # Predict objective function
-        y_mean_f, y_std_f = self.gp_f.predict(x, return_std=True)
-
-        # Predict constraint function
-        y_mean_v, y_std_v = self.gp_v.predict(x, return_std=True)
-
-        # Compute acquisition function
-        af_value = self.acquisition_function(x)
-
-        plt.figure(figsize=(12, 8))
-
-        plt.plot(x, y_mean_f, 'b-', label='Predicted objective')
-        plt.fill_between(x.ravel(), y_mean_f - y_std_f, y_mean_f + y_std_f, alpha=0.5, color='b')
-        plt.plot(self.X, self.f, 'bx', label='Observed objective')
-
-        plt.plot(x, y_mean_v, 'g-', label='Predicted constraint')
-        plt.fill_between(x.ravel(), y_mean_v - y_std_v, y_mean_v + y_std_v, alpha=0.5, color='g')
-        plt.plot(self.X, self.v, 'gx', label='Observed constraint')
-
-        plt.plot(x, af_value, 'r-', label='Acquisition function')
-
-        if plot_recommendation:
-            plt.axvline(self.next_recommendation(), color='r', linestyle='--', label='Next recommendation')
-
-        plt.axhline(SAFETY_THRESHOLD, color='r', linestyle='--', label='Safety threshold')
-        plt.legend()
-
-        plt.tight_layout()
-        plt.show()
+        
 
 
 # ---
@@ -296,6 +237,7 @@ def main():
 
     print(f'Optimal value: 0\nProposed solution {solution}\nSolution value '
           f'{f(solution)}\nRegret {regret}\nUnsafe-evals {unsafe_evals}\n')
+    
 
 
 if __name__ == "__main__":
